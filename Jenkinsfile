@@ -1,45 +1,45 @@
 pipeline {
-  agent {
-    docker {
-      image 'docker:24-dind'            
-      args  '-v /var/run/docker.sock:/var/run/docker.sock'
-    }
-  }
+  agent any
+  tools { maven 'Maven 3.9.4' }
   environment {
-    IMAGE_NAME         = "miUsuarioDocker/simple-java-maven-app"
+    IMAGE_NAME = "codefher/simple-java-maven-app"
     REGISTRY_CREDENTIAL = 'dockerhub-creds'
   }
   stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
     stage('Build JAR') {
-      steps {
-        sh 'mvn clean package'
-      }
+      steps { sh 'mvn clean package' }
     }
     stage('Build Docker Image') {
       steps {
-        sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+        script {
+          dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_NUMBER}")
+        }
       }
     }
     stage('Push to Docker Hub') {
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: REGISTRY_CREDENTIAL,
-          usernameVariable: 'DOCKER_USER',
-          passwordVariable: 'DOCKER_PASS'
-        )]) {
-          sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
-          sh "docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+        script {
+          docker.withRegistry('https://registry.hub.docker.com', "${REGISTRY_CREDENTIAL}") {
+            dockerImage.push()
+          }
         }
       }
     }
     stage('Archive Artifacts') {
       steps {
-        archiveArtifacts artifacts: 'target/*.jar'
+        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
       }
     }
   }
   post {
-    success { slackSend color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER} Image pushed" }
-    failure { slackSend color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER} FAILED" }
+    success {
+      slackSend color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER} Image pushed (${IMAGE_NAME}:${env.BUILD_NUMBER})"
+    }
+    failure {
+      slackSend color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER} FAILED"
+    }
   }
 }
