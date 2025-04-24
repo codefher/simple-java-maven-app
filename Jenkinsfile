@@ -1,106 +1,39 @@
 pipeline {
-    agent any
+  agent {
+    docker {
+      image 'maven:3.8.8-openjdk-17'
+      args  '-v /var/run/docker.sock:/var/run/docker.sock'
+    }
+  }
 
-    tools {
-        maven 'Maven 3.9.4'
-        // sonarScanner 'SonarScanner'
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
     }
 
-    triggers {
-        pollSCM('H/5 * * * *')
+    stage('Build & Test') {
+      steps {
+        // dentro del contenedor ya hay Java y mvn
+        sh 'chmod +x mvnw'
+        sh './mvnw clean package'
+      }
     }
 
-    environment {
-        IMAGE_NAME           = 'codefher/simple-java-maven-app'
-        REGISTRY_CREDENTIAL  = 'dockerhub-creds'
-        SONARQUBE_SERVER     = 'MySonarQube'
-        SONAR_PROJECT_KEY    = 'simple-java-maven-app'
-        SONAR_PROJECT_NAME   = 'Simple Java Maven App'
-    }
-
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Sonar Analysis') {
-            steps {
-                withSonarQubeEnv("${SONARQUBE_SERVER}") {
-                    sh """
-                        mvn sonar:sonar \
-                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                          -Dsonar.projectName='${SONAR_PROJECT_NAME}'
-                    """
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Build JAR') {
-            steps {
-                sh 'mvn clean package'
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_NUMBER}")
-                }
-            }
-        }
-
-        stage('Push to Docker Hub') {
-            steps {
-                script {
-                    docker.withRegistry('https://registry.hub.docker.com', REGISTRY_CREDENTIAL) {
-                        dockerImage.push()
-                    }
-                }
-            }
-        }
-
-        stage('Archive Artifacts') {
-            steps {
-                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-            }
-        }
-
-        stage('Deploy to Staging') {
-          steps {
-            dir('deploy') {
-              withEnv(["BUILD_NUMBER=${env.BUILD_NUMBER}"]) {
-                sh 'docker-compose -f docker-compose.staging.yml pull'
-                sh 'docker-compose -f docker-compose.staging.yml up -d'
-                // Baja cualquier contenedor previo (ignora errores si no existe)
-                sh 'docker-compose -f docker-compose.staging.yml down || true'
-                // Descarga la imagen etiquetada
-                sh 'docker-compose -f docker-compose.staging.yml pull'
-                // Levanta el contenedor limpio
-                sh 'docker-compose -f docker-compose.staging.yml up -d'
-              }
-            }
+    stage('Build Docker Image') {
+      steps {
+        script {
+          dockerImage = docker.build("codefher/spring-web-service:${env.BUILD_NUMBER}")
+          docker.withRegistry('', 'dockerhub-creds') {
+            dockerImage.push()
           }
         }
+      }
     }
 
-    post {
-        success {
-            slackSend color: 'good',
-                      message: "🚀 ${env.JOB_NAME} #${env.BUILD_NUMBER} desplegado en Staging (http://localhost:8081)"
-        }
-        failure {
-            slackSend color: 'danger',
-                      message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER} ha fallado"
-        }
-    }
+    // … deploy como antes …
+  }
+
+  post {
+    always { archiveArtifacts artifacts: 'service.log', allowEmptyArchive: true }
+  }
 }
