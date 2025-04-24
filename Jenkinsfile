@@ -2,7 +2,7 @@ pipeline {
   agent any
   tools {
     maven 'Maven 3.9.4'
-    sonarScanner 'SonarScanner'
+    sonarRunner 'SonarScanner'
   }
   environment {
     IMAGE_NAME           = "codefher/simple-java-maven-app"
@@ -50,6 +50,13 @@ pipeline {
     }
     stage('Archive Artifacts') {
       steps { archiveArtifacts artifacts: 'target/*.jar', fingerprint: true }
+    }
+    stage('SonarQube analysis') {
+      steps {
+        withSonarQubeEnv('MySonarQube') {
+          sh 'sonar-scanner'
+        }
+      }
     }
   }
   post {
