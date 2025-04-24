@@ -2,42 +2,64 @@ pipeline {
   agent any
   tools {
     maven 'Maven 3.9.4'
+    sonarScanner 'SonarScanner'
   }
-  triggers { pollSCM('H/5 * * * *') }
+  environment {
+    IMAGE_NAME           = "codefher/simple-java-maven-app"
+    REGISTRY_CREDENTIAL  = 'dockerhub-creds'
+    SONARQUBE_SERVER     = 'MySonarQube'
+    SONAR_PROJECT_KEY    = 'simple-java-maven-app'
+    SONAR_PROJECT_NAME   = 'Simple Java Maven App'
+  }
   stages {
     stage('Checkout') {
       steps { checkout scm }
     }
-    stage('Build') {
+    stage('Sonar Analysis') {
       steps {
-        sh 'mvn clean package'
+        withSonarQubeEnv("${SONARQUBE_SERVER}") {
+          sh "mvn sonar:sonar \
+              -Dsonar.projectKey=${SONARQUBE_PROJECT_KEY} \
+              -Dsonar.projectName='${SONAR_PROJECT_NAME}'"
+        }
       }
     }
-    stage('SonarQube analysis') {
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
+        }
+      }
+    }
+    stage('Build JAR') {
+      steps { sh 'mvn clean package' }
+    }
+    stage('Build Docker Image') {
+      steps {
+        script { dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_NUMBER}") }
+      }
+    }
+    stage('Push to Docker Hub') {
       steps {
         script {
-          // 'SonarScanner' debe coincidir EXACTO con el Name que diste en Global Tool Configuration → SonarQube Scanner
-          // y type debe ser la clase que Jenkins listó como válida: hudson.plugins.sonar.SonarRunnerInstallation
-          def scannerHome = tool name: 'SonarScanner', type: hudson.plugins.sonar.SonarRunnerInstallation
-          withSonarQubeEnv('MySonarQube') {
-            // Ejecuta el binario del scanner
-            sh "${scannerHome}/bin/sonar-scanner"
+          docker.withRegistry('https://registry.hub.docker.com', REGISTRY_CREDENTIAL) {
+            dockerImage.push()
           }
         }
       }
     }
-    stage('Archive') {
-      steps {
-        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-      }
+    stage('Archive Artifacts') {
+      steps { archiveArtifacts artifacts: 'target/*.jar', fingerprint: true }
     }
   }
   post {
     success {
-      slackSend color: 'good', message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER} OK (<${env.BUILD_URL}|Ver>)"
+      slackSend color: 'good',
+        message: "✅ ${env.JOB_NAME} #${env.BUILD_NUMBER} passed Quality Gate"
     }
     failure {
-      slackSend color: 'danger', message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER} FALLÓ (<${env.BUILD_URL}|Ver>)"
+      slackSend color: 'danger',
+        message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER} broken Quality Gate"
     }
   }
 }
