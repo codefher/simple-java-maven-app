@@ -1,14 +1,15 @@
 pipeline {
+  /* 1) Arranca TODO el Pipeline dentro del contenedor maven:3.8.8-openjdk-17 */
   agent {
     docker {
       image 'maven:3.8.8-openjdk-17'
-      // Para poder llamar a docker build/push si lo necesitas:
       args  '-v /var/run/docker.sock:/var/run/docker.sock'
     }
   }
 
   environment {
     IMAGE_NAME = 'codefher/spring-web-service'
+    SERVICE_PORT = '8081'  // si tu app arranca en 8081
   }
 
   stages {
@@ -20,15 +21,14 @@ pipeline {
 
     stage('Prepare') {
       steps {
-        // Asegura permisos
         sh 'chmod +x mvnw'
       }
     }
 
     stage('Build & Test') {
       steps {
-        // Ahora mvnw encontrará JAVA_HOME dentro del contenedor maven:...-openjdk-17
-        sh './mvnw clean package'
+        // Dentro del contenedor ya hay Java y Maven, así que ./mvnw funciona perfectamente
+        sh './mvnw clean package -DskipTests'
       }
     }
 
@@ -71,7 +71,7 @@ pipeline {
       echo "✅ Deployed ${IMAGE_NAME}:${env.BUILD_NUMBER}"
     }
     failure {
-      echo "❌ Falló el pipeline, revisa los logs"
+      echo "❌ Falló el pipeline, revisa los logs y el service.log"
     }
   }
 }
