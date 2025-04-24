@@ -2,7 +2,7 @@ pipeline {
   agent any
   tools {
     maven 'Maven 3.9.4'
-    sonarRunner 'SonarScanner'
+    sonar  'SonarScanner'    // tu instalación de SonarQube Scanner
   }
   environment {
     IMAGE_NAME           = "codefher/simple-java-maven-app"
@@ -53,8 +53,8 @@ pipeline {
     }
     stage('SonarQube analysis') {
       steps {
-        withSonarQubeEnv('MySonarQube') {
-          sh 'sonar-scanner'
+        withSonarQubeEnv('MySonarQube') {      // debe coincidir con el Name que pusiste en Configure System → SonarQube servers
+          sh 'sonar-scanner'                   // arrancará el scanner instalado vía tools { sonar … }
         }
       }
     }
