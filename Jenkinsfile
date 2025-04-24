@@ -76,15 +76,14 @@ pipeline {
         }
 
         stage('Deploy to Staging') {
-            steps {
-                dir('deploy') {
-                    sh """
-                      export BUILD_NUMBER=${env.BUILD_NUMBER}
-                      docker compose pull
-                      docker compose up -d
-                    """
-                }
+          steps {
+            dir('deploy') {
+              withEnv(["BUILD_NUMBER=${env.BUILD_NUMBER}"]) {
+                sh 'docker-compose pull'
+                sh 'docker-compose up -d'
+              }
             }
+          }
         }
     }
 
