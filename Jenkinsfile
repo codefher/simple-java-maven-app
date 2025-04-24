@@ -1,77 +1,106 @@
 pipeline {
-  /* 1) Arranca TODO el Pipeline dentro del contenedor maven:3.8.8-openjdk-17 */
-  agent {
-    docker {
-      image 'maven:3.8.8-eclipse-temurin-17'
-      args  '-v /var/run/docker.sock:/var/run/docker.sock'
-    }
-  }
+    agent any
 
-  environment {
-    IMAGE_NAME = 'codefher/spring-web-service'
-    SERVICE_PORT = '8081'  // si tu app arranca en 8081
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    tools {
+        maven 'Maven 3.9.4'
+        // sonarScanner 'SonarScanner'
     }
 
-    stage('Prepare') {
-      steps {
-        sh 'chmod +x mvnw'
-      }
+    triggers {
+        pollSCM('H/5 * * * *')
     }
 
-    stage('Build & Test') {
-      steps {
-        // Dentro del contenedor ya hay Java y Maven, así que ./mvnw funciona perfectamente
-        sh './mvnw clean package -DskipTests'
-      }
+    environment {
+        IMAGE_NAME           = 'codefher/simple-java-maven-app'
+        REGISTRY_CREDENTIAL  = 'dockerhub-creds'
+        SONARQUBE_SERVER     = 'MySonarQube'
+        SONAR_PROJECT_KEY    = 'simple-java-maven-app'
+        SONAR_PROJECT_NAME   = 'Simple Java Maven App'
     }
 
-    stage('Build Docker Image') {
-      steps {
-        script {
-          dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_NUMBER}")
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
 
-    stage('Push to Docker Hub') {
-      steps {
-        script {
-          docker.withRegistry('https://registry.hub.docker.com', 'dockerhub-creds') {
-            dockerImage.push()
+        stage('Sonar Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh """
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                          -Dsonar.projectName='${SONAR_PROJECT_NAME}'
+                    """
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build JAR') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_NUMBER}")
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', REGISTRY_CREDENTIAL) {
+                        dockerImage.push()
+                    }
+                }
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            }
+        }
+
+        stage('Deploy to Staging') {
+          steps {
+            dir('deploy') {
+              withEnv(["BUILD_NUMBER=${env.BUILD_NUMBER}"]) {
+                sh 'docker-compose -f docker-compose.staging.yml pull'
+                sh 'docker-compose -f docker-compose.staging.yml up -d'
+                // Baja cualquier contenedor previo (ignora errores si no existe)
+                sh 'docker-compose -f docker-compose.staging.yml down || true'
+                // Descarga la imagen etiquetada
+                sh 'docker-compose -f docker-compose.staging.yml pull'
+                // Levanta el contenedor limpio
+                sh 'docker-compose -f docker-compose.staging.yml up -d'
+              }
+            }
           }
         }
-      }
     }
 
-    stage('Deploy to Staging') {
-      steps {
-        dir('deploy') {
-          withEnv(["BUILD_NUMBER=${env.BUILD_NUMBER}"]) {
-            sh 'docker-compose down || true'
-            sh 'docker-compose pull'
-            sh 'docker-compose up -d'
-          }
+    post {
+        success {
+            slackSend color: 'good',
+                      message: "🚀 ${env.JOB_NAME} #${env.BUILD_NUMBER} desplegado en Staging (http://localhost:8081)"
         }
-      }
+        failure {
+            slackSend color: 'danger',
+                      message: "❌ ${env.JOB_NAME} #${env.BUILD_NUMBER} ha fallado"
+        }
     }
-  }
-
-  post {
-    always {
-      archiveArtifacts artifacts: 'service.log', allowEmptyArchive: true
-    }
-    success {
-      echo "✅ Deployed ${IMAGE_NAME}:${env.BUILD_NUMBER}"
-    }
-    failure {
-      echo "❌ Falló el pipeline, revisa los logs y el service.log"
-    }
-  }
 }
