@@ -3,7 +3,7 @@ pipeline {
 
     tools {
         maven 'Maven 3.9.4'
-        sonarScanner 'SonarScanner'
+        // sonarScanner 'SonarScanner'
     }
 
     triggers {
