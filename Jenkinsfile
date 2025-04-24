@@ -79,6 +79,8 @@ pipeline {
           steps {
             dir('deploy') {
               withEnv(["BUILD_NUMBER=${env.BUILD_NUMBER}"]) {
+                sh 'docker-compose -f docker-compose.staging.yml pull'
+                sh 'docker-compose -f docker-compose.staging.yml up -d'
                 // Baja cualquier contenedor previo (ignora errores si no existe)
                 sh 'docker-compose -f docker-compose.staging.yml down || true'
                 // Descarga la imagen etiquetada
@@ -89,8 +91,6 @@ pipeline {
             }
           }
         }
-
-      }
     }
 
     post {
