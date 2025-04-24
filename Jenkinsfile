@@ -79,8 +79,8 @@ pipeline {
           steps {
             dir('deploy') {
               withEnv(["BUILD_NUMBER=${env.BUILD_NUMBER}"]) {
-                sh 'docker-compose pull'
-                sh 'docker-compose up -d'
+                sh 'docker-compose -f docker-compose.staging.yml pull'
+                sh 'docker-compose -f docker-compose.staging.yml up -d'
               }
             }
           }
